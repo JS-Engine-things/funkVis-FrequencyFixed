@@ -57,6 +57,8 @@ class SpectralAnalyzer
     private var blackmanWindow = new Array<Float>();
     #end
 
+    private static inline var LN10:Float = 2.302585092994046; // Natural logarithm of 10
+
     private function freqToBin(freq:Float, mathType:MathType = Round):Int
     {       
         var bin = freq * fftN2 / audioClip.audioBuffer.sampleRate;
@@ -175,6 +177,13 @@ class SpectralAnalyzer
                 value = Math.max(value, amplitudes[Std.int(j)]);
             }
 
+            if (bar.freqLo < 350 && bar.freqLo > 100) {
+                value += 10;
+            }
+            if (bar.freqLo < 3500 && bar.freqLo > 2000) {
+                value -= 2;
+            }
+
             // this isn't for clamping, it's to get a value
             // between 0 and 1!
             value = normalizedB(value);
@@ -219,6 +228,14 @@ class SpectralAnalyzer
             if (barHistories[i] == null) barHistories[i] = new RecentPeakFinder();
             var recentValues = barHistories[i];
             var value = bars[i] / range;
+
+            var frequency = minFreq * Math.pow(10, (Math.log(maxFreq / minFreq) / LN10 * (i / barCount)));
+            if (frequency < 350 && frequency > 100) {
+                value *= 1.28;
+            }
+            if (frequency < 3500 && frequency > 2000) {
+                value *= 0.85;
+            }
 
             // slew limiting
             var lastValue = recentValues.lastValue;
