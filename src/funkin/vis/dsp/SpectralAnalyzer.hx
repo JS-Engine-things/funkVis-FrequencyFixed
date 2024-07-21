@@ -180,7 +180,7 @@ class SpectralAnalyzer
             if (bar.freqLo < 350 && bar.freqLo > 100) {
                 value += 10;
             }
-            if (bar.freqLo < 3500 && bar.freqLo > 2000) {
+            if (bar.binHi > 2800) {
                 value -= 2;
             }
 
@@ -231,9 +231,9 @@ class SpectralAnalyzer
 
             var frequency = minFreq * Math.pow(10, (Math.log(maxFreq / minFreq) / LN10 * (i / barCount)));
             if (frequency < 350 && frequency > 100) {
-                value *= 1.28;
+                value *= 1.255;
             }
-            if (frequency < 3500 && frequency > 2000) {
+            if (frequency > 2800) {
                 value *= 0.85;
             }
 
