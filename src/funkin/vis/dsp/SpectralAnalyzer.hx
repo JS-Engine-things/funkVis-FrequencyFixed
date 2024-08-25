@@ -38,11 +38,11 @@ class SpectralAnalyzer
     public var minDb(default, set):Float = -70;
     public var maxDb(default, set):Float = -20;
     public var fftN(default, set):Int = 4096;
-    public var minFreq:Float = 50;
+    public var minFreq:Float = 20;
     public var maxFreq:Float = 22000;
     // Awkwardly, we'll have to interfaces for now because there's too much platform specific stuff we need
-    private var audioSource:AudioSource;
-    private var audioClip:AudioClip;
+    var audioSource:AudioSource;
+    var audioClip:AudioClip;
 	private var barCount:Int;
     private var maxDelta:Float;
     private var peakHold:Int;
@@ -58,6 +58,12 @@ class SpectralAnalyzer
     #end
 
     private static inline var LN10:Float = 2.302585092994046; // Natural logarithm of 10
+
+
+    public function changeSnd(audioSource:AudioSource) {
+        this.audioSource = audioSource;
+		this.audioClip = new LimeAudioClip(audioSource);
+    }
 
     private function freqToBin(freq:Float, mathType:MathType = Round):Int
     {       
