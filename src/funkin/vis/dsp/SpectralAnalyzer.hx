@@ -199,6 +199,11 @@ class SpectralAnalyzer {
 		var wantedLength = fftN * numOctets * audioSource.buffer.channels;
 		var startFrame = audioClip.currentFrame;
 		startFrame -= startFrame % numOctets;
+                if (startFrame < 0)
+                {
+                        return levels = [for (bar in 0...barCount) {value: 0, peak: 0}];
+                }
+		
 		var segment = audioSource.buffer.data.subarray(startFrame, min(startFrame + wantedLength, audioSource.buffer.data.length));
 		var signal = getSignal(segment, audioSource.buffer.bitsPerSample);
 
