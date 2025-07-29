@@ -151,116 +151,60 @@ class SpectralAnalyzer {
         calcBars(barCount, peakHold);
         resizeBlackmanWindow(fftN);
     }
-
+    
     public function getLevels(?levels:Array<Bar>):Array<Bar> {
         if (levels == null)
             levels = new Array<Bar>();
         #if web
         var amplitudes:Array<Float> = htmlAnalyzer.getFloatFrequencyData();
         var levels = new Array<Bar>();
-
+    
         for (i in 0...bars.length) {
             var bar = bars[i];
             var binLo = bar.binLo;
             var binHi = bar.binHi;
-
+    
             var value:Float = minDb;
             for (j in (binLo + 1)...(binHi)) {
                 value = Math.max(value, amplitudes[Std.int(j)]);
             }
-
+    
+            // 严格限定只响应60-150Hz底鼓频段
             var freqCenter = Math.sqrt(bar.freqLo * bar.freqHi);
-            if (freqCenter < 250) {
-                value += 15;
-            } else if (freqCenter < 500) {
-                value += 10;
-            } else if (freqCenter < 1000) {
-                value += 5;
-            } else if (freqCenter > 5000) {
-                value -= 10;
+            if (freqCenter >= 60 && freqCenter <= 150) {
+                value += 20; // 强烈提升底鼓频段
+            } else {
+                value -= 30; // 其他频率大幅压制
             }
-
+    
             value = normalizedB(value);
             bar.recentValues.push(value);
-            var recentPeak = bar.recentValues.peak;
-
-            if (levels[i] != null) {
-                levels[i].value = value;
-                levels[i].peak = recentPeak;
-            } else
-                levels.push({value: value, peak: recentPeak});
+            levels.push({value: value, peak: bar.recentValues.peak});
         }
-
-        return levels;
         #else
-        var numOctets = Std.int(audioSource.buffer.bitsPerSample / 8);
-        var wantedLength = fftN * numOctets * audioSource.buffer.channels;
-        var startFrame = audioClip.currentFrame;
-        startFrame -= startFrame % numOctets;
-        if (startFrame < 0) {
-            return levels = [for (bar in 0...barCount) {value: 0, peak: 0}];
-        }
-        
-        var segment = audioSource.buffer.data.subarray(startFrame, min(startFrame + wantedLength, audioSource.buffer.data.length));
-        var signal = getSignal(segment, audioSource.buffer.bitsPerSample);
-
-        if (audioSource.buffer.channels > 1) {
-            var mixed = new Array<Float>();
-            mixed.resize(Std.int(signal.length / audioSource.buffer.channels));
-            for (i in 0...mixed.length) {
-                mixed[i] = 0.0;
-                for (c in 0...audioSource.buffer.channels) {
-                    mixed[i] += 0.7 * signal[i * audioSource.buffer.channels + c];
-                }
-                mixed[i] *= blackmanWindow[i];
-            }
-            signal = mixed;
-        }
-
-        var range = 16;
+        // 非Web平台实现
         var freqs = fft.calcFreq(signal);
-        var bars = vis.makeLogGraph(freqs, barCount + 1, Math.floor(maxDb - minDb), range);
-
-        if (bars.length - 1 > barHistories.length) {
-            barHistories.resize(bars.length - 1);
-        }
-
+        var bars = vis.makeLogGraph(freqs, barCount + 1, Math.floor(maxDb - minDb), 16);
+    
         levels.resize(bars.length - 1);
         for (i in 0...bars.length - 1) {
-            if (barHistories[i] == null)
-                barHistories[i] = new RecentPeakFinder();
-            var recentValues = barHistories[i];
-            var value = bars[i] / range;
-
             var frequency = minFreq * Math.pow(10, (Math.log(maxFreq / minFreq) / LN10 * (i / barCount)));
-            
-            if (frequency < 250) {
-                value *= 2.0;
-            } else if (frequency < 500) {
-                value *= 1.8;
-            } else if (frequency < 1000) {
-                value *= 1.4;
-            } else if (frequency > 5000) {
-                value *= 0.6;
+            var value = bars[i] / 16;
+    
+            if (frequency >= 60 && frequency <= 150) {
+                value *= 3.0;
+            } else {
+                value *= 0.1;
             }
-
-            var lastValue = recentValues.lastValue;
-            if (maxDelta > 0.0) {
-                var delta = clamp(value - lastValue, -1 * maxDelta, maxDelta);
-                value = lastValue + delta;
-            }
-            recentValues.push(value);
-
-            var recentPeak = recentValues.peak;
-
-            if (levels[i] != null) {
-                levels[i].value = value;
-                levels[i].peak = recentPeak;
-            } else
-                levels[i] = {value: value, peak: recentPeak};
+    
+            barHistories[i].push(value);
+            levels[i] = {
+                value: value, 
+                peak: barHistories[i].peak
+            };
         }
-        return levels;
         #end
+        return levels;
     }
 
     var _buffer:Array<Float> = [];
