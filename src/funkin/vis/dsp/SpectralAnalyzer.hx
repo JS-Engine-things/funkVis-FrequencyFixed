@@ -11,306 +11,336 @@ import lime.media.AudioSource;
 using grig.audio.lime.UInt8ArrayTools;
 
 typedef Bar = {
-    var value:Float;
-    var peak:Float;
+	var value:Float;
+	var peak:Float;
 }
 
 typedef BarObject = {
-    var binLo:Int;
-    var binHi:Int;
-    var freqLo:Float;
-    var freqHi:Float;
-    var recentValues:RecentPeakFinder;
+	var binLo:Int;
+	var binHi:Int;
+	var freqLo:Float;
+	var freqHi:Float;
+	var recentValues:RecentPeakFinder;
 }
 
 enum MathType {
-    Round;
-    Floor;
-    Ceil;
-    Cast;
+	Round;
+	Floor;
+	Ceil;
+	Cast;
 }
 
 class SpectralAnalyzer {
-    public var minDb(default, set):Float = -70;
-    public var maxDb(default, set):Float = -20;
-    public var fftN(default, set):Int = 4096;
-    public var minFreq:Float = 20;
-    public var maxFreq:Float = 22000;
+	public var minDb(default, set):Float = -70;
+	public var maxDb(default, set):Float = -20;
+	public var fftN(default, set):Int = 4096;
+	public var minFreq:Float = 20;
+	public var maxFreq:Float = 22000;
 
-    var audioSource:AudioSource;
-    var audioClip:AudioClip;
-    private var barCount:Int;
-    private var maxDelta:Float;
-    private var peakHold:Int;
-    var fftN2:Int = 2048;
-    #if web
-    private var htmlAnalyzer:AnalyzerNode;
-    private var bars:Array<BarObject> = [];
-    #else
-    private var fft:FFT;
-    private var vis = new FFTVisualization();
-    private var barHistories = new Array<RecentPeakFinder>();
-    private var blackmanWindow = new Array<Float>();
-    #end
+	// Awkwardly, we'll have to interfaces for now because there's too much platform specific stuff we need
+	var audioSource:AudioSource;
+	var audioClip:AudioClip;
+	private var barCount:Int;
+	private var maxDelta:Float;
+	private var peakHold:Int;
+	var fftN2:Int = 2048;
+	#if web
+	private var htmlAnalyzer:AnalyzerNode;
+	private var bars:Array<BarObject> = [];
+	#else
+	private var fft:FFT;
+	private var vis = new FFTVisualization();
+	private var barHistories = new Array<RecentPeakFinder>();
+	private var blackmanWindow = new Array<Float>();
+	#end
 
-    private static inline var LN10:Float = 2.302585092994046;
+	private static inline var LN10:Float = 2.302585092994046; // Natural logarithm of 10
 
-    public function changeSnd(audioSource:AudioSource) {
-        this.audioSource = audioSource;
-        this.audioClip = new LimeAudioClip(audioSource);
-    }
+	public function changeSnd(audioSource:AudioSource) {
+		this.audioSource = audioSource;
+		this.audioClip = new LimeAudioClip(audioSource);
+	}
 
-    private function freqToBin(freq:Float, mathType:MathType = Round):Int {
-        var bin = freq * fftN2 / audioClip.audioBuffer.sampleRate;
-        return switch (mathType) {
-            case Round: Math.round(bin);
-            case Floor: Math.floor(bin);
-            case Ceil: Math.ceil(bin);
-            case Cast: Std.int(bin);
-        }
-    }
+	private function freqToBin(freq:Float, mathType:MathType = Round):Int {
+		var bin = freq * fftN2 / audioClip.audioBuffer.sampleRate;
+		return switch (mathType) {
+			case Round: Math.round(bin);
+			case Floor: Math.floor(bin);
+			case Ceil: Math.ceil(bin);
+			case Cast: Std.int(bin);
+		}
+	}
 
-    function normalizedB(value:Float) {
-        var maxValue = maxDb;
-        var minValue = minDb;
-        return clamp((value - minValue) / (maxValue - minValue), 0, 1);
-    }
+	function normalizedB(value:Float) {
+		var maxValue = maxDb;
+		var minValue = minDb;
 
-    function calcBars(barCount:Int, peakHold:Int) {
-        #if web
-        bars = [];
-        var logStep = (LogHelper.log10(maxFreq) - LogHelper.log10(minFreq)) / (barCount);
+		return clamp((value - minValue) / (maxValue - minValue), 0, 1);
+	}
 
-        var scaleMin:Float = Scaling.freqScaleLog(minFreq);
-        var scaleMax:Float = Scaling.freqScaleLog(maxFreq);
+	function calcBars(barCount:Int, peakHold:Int) {
+		#if web
+		bars = [];
+		var logStep = (LogHelper.log10(maxFreq) - LogHelper.log10(minFreq)) / (barCount);
 
-        var curScale:Float = scaleMin;
+		var scaleMin:Float = Scaling.freqScaleLog(minFreq);
+		var scaleMax:Float = Scaling.freqScaleLog(maxFreq);
 
-        for (i in 0...barCount) {
-            var curFreq:Float = Math.pow(10, LogHelper.log10(minFreq) + (logStep * i));
+		var curScale:Float = scaleMin;
 
-            var freqLo:Float = curFreq;
-            var freqHi:Float = Math.pow(10, LogHelper.log10(minFreq) + (logStep * (i + 1)));
+		// var stride = (scaleMax - scaleMin) / bands;
 
-            var binLo = freqToBin(freqLo, Floor);
-            var binHi = freqToBin(freqHi);
+		for (i in 0...barCount) {
+			var curFreq:Float = Math.pow(10, LogHelper.log10(minFreq) + (logStep * i));
 
-            bars.push({
-                binLo: binLo,
-                binHi: binHi,
-                freqLo: freqLo,
-                freqHi: freqHi,
-                recentValues: new RecentPeakFinder(peakHold)
-            });
-        }
+			var freqLo:Float = curFreq;
+			var freqHi:Float = Math.pow(10, LogHelper.log10(minFreq) + (logStep * (i + 1)));
 
-        if (bars[0].freqLo < minFreq) {
-            bars[0].freqLo = minFreq;
-            bars[0].binLo = freqToBin(minFreq, Floor);
-        }
+			var binLo = freqToBin(freqLo, Floor);
+			var binHi = freqToBin(freqHi);
 
-        if (bars[bars.length - 1].freqHi > maxFreq) {
-            bars[bars.length - 1].freqHi = maxFreq;
-            bars[bars.length - 1].binHi = freqToBin(maxFreq, Floor);
-        }
-        #else
-        if (barCount > barHistories.length) {
-            barHistories.resize(barCount);
-        }
-        for (i in 0...barCount) {
-            if (barHistories[i] == null)
-                barHistories[i] = new RecentPeakFinder();
-        }
-        #end
-    }
+			bars.push({
+				binLo: binLo,
+				binHi: binHi,
+				freqLo: freqLo,
+				freqHi: freqHi,
+				recentValues: new RecentPeakFinder(peakHold)
+			});
+		}
 
-    function resizeBlackmanWindow(size:Int) {
-        #if !web
-        if (blackmanWindow.length == size)
-            return;
-        blackmanWindow.resize(size);
-        for (i in 0...size) {
-            blackmanWindow[i] = calculateBlackmanWindow(i, size);
-        }
-        #end
-    }
+		if (bars[0].freqLo < minFreq) {
+			bars[0].freqLo = minFreq;
+			bars[0].binLo = freqToBin(minFreq, Floor);
+		}
 
-    public function new(audioSource:AudioSource, barCount:Int, maxDelta:Float = 0.01, peakHold:Int = 30) {
-        this.audioSource = audioSource;
-        this.audioClip = new LimeAudioClip(audioSource);
-        this.barCount = barCount;
-        this.maxDelta = maxDelta;
-        this.peakHold = peakHold;
+		if (bars[bars.length - 1].freqHi > maxFreq) {
+			bars[bars.length - 1].freqHi = maxFreq;
+			bars[bars.length - 1].binHi = freqToBin(maxFreq, Floor);
+		}
+		#else
+		if (barCount > barHistories.length) {
+			barHistories.resize(barCount);
+		}
+		for (i in 0...barCount) {
+			if (barHistories[i] == null)
+				barHistories[i] = new RecentPeakFinder();
+		}
+		#end
+	}
 
-        #if web
-        htmlAnalyzer = new AnalyzerNode(audioClip);
-        #else
-        fft = new FFT(fftN);
-        #end
+	function resizeBlackmanWindow(size:Int) {
+		#if !web
+		if (blackmanWindow.length == size)
+			return;
+		blackmanWindow.resize(size);
+		for (i in 0...size) {
+			blackmanWindow[i] = calculateBlackmanWindow(i, size);
+		}
+		#end
+	}
 
-        calcBars(barCount, peakHold);
-        resizeBlackmanWindow(fftN);
-    }
+	public function new(audioSource:AudioSource, barCount:Int, maxDelta:Float = 0.01, peakHold:Int = 30) {
+		this.audioSource = audioSource;
+		this.audioClip = new LimeAudioClip(audioSource);
+		this.barCount = barCount;
+		this.maxDelta = maxDelta;
+		this.peakHold = peakHold;
 
-    private function getSignal(data:lime.utils.UInt8Array, bitsPerSample:Int):Array<Float> {
-        var signal = new Array<Float>();
-        switch (bitsPerSample) {
-            case 8:
-                signal.resize(data.length);
-                for (i in 0...data.length)
-                    signal[i] = data[i] / 128.0 - 1.0;
+		#if web
+		htmlAnalyzer = new AnalyzerNode(audioClip);
+		#else
+		fft = new FFT(fftN);
+		#end
 
-            case 16:
-                signal.resize(Std.int(data.length / 2));
-                for (i in 0...signal.length)
-                    signal[i] = data.getInt16(i * 2) / 32768.0;
+		calcBars(barCount, peakHold);
+		resizeBlackmanWindow(fftN);
+	}
 
-            case 24:
-                signal.resize(Std.int(data.length / 3));
-                for (i in 0...signal.length)
-                    signal[i] = data.getInt24(i * 3) / 8388608.0;
+	public function getLevels(?levels:Array<Bar>):Array<Bar> {
+		if (levels == null)
+			levels = new Array<Bar>();
+		#if web
+		var amplitudes:Array<Float> = htmlAnalyzer.getFloatFrequencyData();
+		var levels = new Array<Bar>();
 
-            case 32:
-                signal.resize(Std.int(data.length / 4));
-                for (i in 0...signal.length)
-                    signal[i] = data.getInt32(i * 4) / 2147483648.0;
+		for (i in 0...bars.length) {
+			var bar = bars[i];
+			var binLo = bar.binLo;
+			var binHi = bar.binHi;
 
-            default:
-                throw 'Unsupported bit depth: $bitsPerSample';
-        }
-        return signal;
-    }
-    
-    public function getLevels(?levels:Array<Bar>):Array<Bar> {
-        if (levels == null)
-            levels = new Array<Bar>();
-        #if web
-        var amplitudes:Array<Float> = htmlAnalyzer.getFloatFrequencyData();
-        var levels = new Array<Bar>();
-    
-        for (i in 0...bars.length) {
-            var bar = bars[i];
-            var binLo = bar.binLo;
-            var binHi = bar.binHi;
-    
-            var value:Float = minDb;
-            for (j in (binLo + 1)...(binHi)) {
-                value = Math.max(value, amplitudes[Std.int(j)]);
-            }
-    
-            // 严格限定只响应60-150Hz底鼓频段
-            var freqCenter = Math.sqrt(bar.freqLo * bar.freqHi);
-            if (freqCenter >= 60 && freqCenter <= 150) {
-                value += 20; // 强烈提升底鼓频段
-            } else {
-                value -= 30; // 其他频率大幅压制
-            }
-    
-            value = normalizedB(value);
-            bar.recentValues.push(value);
-            levels.push({value: value, peak: bar.recentValues.peak});
-        }
-        #else
-        var numOctets = Std.int(audioSource.buffer.bitsPerSample / 8);
-        var wantedLength = fftN * numOctets * audioSource.buffer.channels;
-        var startFrame = audioClip.currentFrame;
-        startFrame -= startFrame % numOctets;
-        if (startFrame < 0) {
-            return levels = [for (bar in 0...barCount) {value: 0, peak: 0}];
-        }
-        
-        var segment = audioSource.buffer.data.subarray(startFrame, min(startFrame + wantedLength, audioSource.buffer.data.length));
-        var signal = getSignal(segment, audioSource.buffer.bitsPerSample);
+			var value:Float = minDb;
+			for (j in (binLo + 1)...(binHi)) {
+				value = Math.max(value, amplitudes[Std.int(j)]);
+			}
 
-        if (audioSource.buffer.channels > 1) {
-            var mixed = new Array<Float>();
-            mixed.resize(Std.int(signal.length / audioSource.buffer.channels));
-            for (i in 0...mixed.length) {
-                mixed[i] = 0.0;
-                for (c in 0...audioSource.buffer.channels) {
-                    mixed[i] += signal[i * audioSource.buffer.channels + c];
+			if (bar.freqLo < 350 && bar.freqLo > 100) {
+				value += 10;
+			}
+			if (bar.binHi > 2800) {
+				value -= 2;
+			}
+
+			// this isn't for clamping, it's to get a value
+			// between 0 and 1!
+			value = normalizedB(value);
+			bar.recentValues.push(value);
+			var recentPeak = bar.recentValues.peak;
+
+			if (levels[i] != null) {
+				levels[i].value = value;
+				levels[i].peak = recentPeak;
+			} else
+				levels.push({value: value, peak: recentPeak});
+		}
+
+		return levels;
+		#else
+		var numOctets = Std.int(audioSource.buffer.bitsPerSample / 8);
+		var wantedLength = fftN * numOctets * audioSource.buffer.channels;
+		var startFrame = audioClip.currentFrame;
+		startFrame -= startFrame % numOctets;
+                if (startFrame < 0)
+                {
+                        return levels = [for (bar in 0...barCount) {value: 0, peak: 0}];
                 }
-                mixed[i] /= audioSource.buffer.channels;
-                mixed[i] *= blackmanWindow[i];
-            }
-            signal = mixed;
-        }
+		
+		var segment = audioSource.buffer.data.subarray(startFrame, min(startFrame + wantedLength, audioSource.buffer.data.length));
+		var signal = getSignal(segment, audioSource.buffer.bitsPerSample);
 
-        var freqs = fft.calcFreq(signal);
-        var bars = vis.makeLogGraph(freqs, barCount + 1, Math.floor(maxDb - minDb), 16);
+		if (audioSource.buffer.channels > 1) {
+			var mixed = new Array<Float>();
+			mixed.resize(Std.int(signal.length / audioSource.buffer.channels));
+			for (i in 0...mixed.length) {
+				mixed[i] = 0.0;
+				for (c in 0...audioSource.buffer.channels) {
+					mixed[i] += 0.7 * signal[i * audioSource.buffer.channels + c];
+				}
+				mixed[i] *= blackmanWindow[i];
+			}
+			signal = mixed;
+		}
 
-        levels.resize(bars.length - 1);
-        for (i in 0...bars.length - 1) {
-            if (barHistories[i] == null)
-                barHistories[i] = new RecentPeakFinder();
-                
-            var frequency = minFreq * Math.pow(10, (Math.log(maxFreq / minFreq) / LN10 * (i / barCount)));
-            var value = bars[i] / 16;
+		var range = 16;
+		var freqs = fft.calcFreq(signal);
+		var bars = vis.makeLogGraph(freqs, barCount + 1, Math.floor(maxDb - minDb), range);
 
-            // 严格频率过滤 - 只响应底鼓
-            if (frequency >= 60 && frequency <= 150) {
-                value *= 3.0; // 底鼓频段三倍增益
-            } else {
-                value *= 0.05; // 其他频段只保留5%信号
-            }
+		if (bars.length - 1 > barHistories.length) {
+			barHistories.resize(bars.length - 1);
+		}
 
-            var lastValue = barHistories[i].lastValue;
-            if (maxDelta > 0.0) {
-                var delta = clamp(value - lastValue, -maxDelta, maxDelta);
-                value = lastValue + delta;
-            }
+		levels.resize(bars.length - 1);
+		for (i in 0...bars.length - 1) {
+			if (barHistories[i] == null)
+				barHistories[i] = new RecentPeakFinder();
+			var recentValues = barHistories[i];
+			var value = bars[i] / range;
 
-            barHistories[i].push(value);
-            levels[i] = {
-                value: value, 
-                peak: barHistories[i].peak
-            };
-        }
-        #end
-        return levels;
-    }
+			var frequency = minFreq * Math.pow(10, (Math.log(maxFreq / minFreq) / LN10 * (i / barCount)));
+			if (frequency < 350 && frequency > 100) {
+				value *= 1.255;
+			}
+			if (frequency > 2800) {
+				value *= 0.85;
+			}
 
-    @:generic
-    static inline function clamp<T:Float>(val:T, min:T, max:T):T {
-        return val <= min ? min : val >= max ? max : val;
-    }
+			// slew limiting
+			var lastValue = recentValues.lastValue;
+			if (maxDelta > 0.0) {
+				var delta = clamp(value - lastValue, -1 * maxDelta, maxDelta);
+				value = lastValue + delta;
+			}
+			recentValues.push(value);
 
-    static function calculateBlackmanWindow(n:Int, fftN:Int) {
-        return 0.42 - 0.50 * Math.cos(2 * Math.PI * n / (fftN - 1)) + 0.08 * Math.cos(4 * Math.PI * n / (fftN - 1));
-    }
+			var recentPeak = recentValues.peak;
 
-    @:generic
-    static public inline function min<T:Float>(x:T, y:T):T {
-        return x > y ? y : x;
-    }
+			if (levels[i] != null) {
+				levels[i].value = value;
+				levels[i].peak = recentPeak;
+			} else
+				levels[i] = {value: value, peak: recentPeak};
+		}
+		return levels;
+		#end
+	}
 
-    function set_minDb(value:Float):Float {
-        minDb = value;
-        #if web
-        htmlAnalyzer.minDecibels = value;
-        #end
-        return value;
-    }
+	// Prevents a memory leak by reusing array
+	var _buffer:Array<Float> = [];
 
-    function set_maxDb(value:Float):Float {
-        maxDb = value;
-        #if web
-        htmlAnalyzer.maxDecibels = value;
-        #end
-        return value;
-    }
+	function getSignal(data:lime.utils.UInt8Array, bitsPerSample:Int):Array<Float> {
+		switch (bitsPerSample) {
+			case 8:
+				_buffer.resize(data.length);
+				for (i in 0...data.length)
+					_buffer[i] = data[i] / 128.0;
 
-    function set_fftN(value:Int):Int {
-        fftN = value;
-        var pow2 = FFT.nextPow2(value);
-        fftN2 = Std.int(pow2 / 2);
-        #if web
-        htmlAnalyzer.fftSize = pow2;
-        #else
-        fft = new FFT(value);
-        #end
-        calcBars(barCount, peakHold);
-        resizeBlackmanWindow(fftN);
-        return pow2;
-    }
+			case 16:
+				_buffer.resize(Std.int(data.length / 2));
+				for (i in 0..._buffer.length)
+					_buffer[i] = data.getInt16(i * 2) / 32767.0;
+
+			case 24:
+				_buffer.resize(Std.int(data.length / 3));
+				for (i in 0..._buffer.length)
+					_buffer[i] = data.getInt24(i * 3) / 8388607.0;
+
+			case 32:
+				_buffer.resize(Std.int(data.length / 4));
+				for (i in 0..._buffer.length)
+					_buffer[i] = data.getInt32(i * 4) / 2147483647.0;
+
+			default:
+				trace('Unknown integer audio format');
+		}
+		return _buffer;
+	}
+
+	@:generic
+	static inline function clamp<T:Float>(val:T, min:T, max:T):T {
+		return val <= min ? min : val >= max ? max : val;
+	}
+
+	static function calculateBlackmanWindow(n:Int, fftN:Int) {
+		return 0.42 - 0.50 * Math.cos(2 * Math.PI * n / (fftN - 1)) + 0.08 * Math.cos(4 * Math.PI * n / (fftN - 1));
+	}
+
+	@:generic
+	static public inline function min<T:Float>(x:T, y:T):T {
+		return x > y ? y : x;
+	}
+
+	function set_minDb(value:Float):Float {
+		minDb = value;
+
+		#if web
+		htmlAnalyzer.minDecibels = value;
+		#end
+
+		return value;
+	}
+
+	function set_maxDb(value:Float):Float {
+		maxDb = value;
+
+		#if web
+		htmlAnalyzer.maxDecibels = value;
+		#end
+
+		return value;
+	}
+
+	function set_fftN(value:Int):Int {
+		fftN = value;
+		var pow2 = FFT.nextPow2(value);
+		fftN2 = Std.int(pow2 / 2);
+
+		#if web
+		htmlAnalyzer.fftSize = pow2;
+		#else
+		fft = new FFT(value);
+		#end
+
+		calcBars(barCount, peakHold);
+		resizeBlackmanWindow(fftN);
+		return pow2;
+	}
 }
