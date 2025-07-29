@@ -183,18 +183,46 @@ class SpectralAnalyzer {
         }
         #else
         // 非Web平台实现
+        var numOctets = Std.int(audioSource.buffer.bitsPerSample / 8);
+        var wantedLength = fftN * numOctets * audioSource.buffer.channels;
+        var startFrame = audioClip.currentFrame;
+        startFrame -= startFrame % numOctets;
+        if (startFrame < 0) {
+            return levels = [for (bar in 0...barCount) {value: 0, peak: 0}];
+        }
+        
+        var segment = audioSource.buffer.data.subarray(startFrame, min(startFrame + wantedLength, audioSource.buffer.data.length));
+        var signal = getSignal(segment, audioSource.buffer.bitsPerSample);
+    
+        if (audioSource.buffer.channels > 1) {
+            var mixed = new Array<Float>();
+            mixed.resize(Std.int(signal.length / audioSource.buffer.channels));
+            for (i in 0...mixed.length) {
+                mixed[i] = 0.0;
+                for (c in 0...audioSource.buffer.channels) {
+                    mixed[i] += 0.7 * signal[i * audioSource.buffer.channels + c];
+                }
+                mixed[i] *= blackmanWindow[i];
+            }
+            signal = mixed;
+        }
+    
         var freqs = fft.calcFreq(signal);
         var bars = vis.makeLogGraph(freqs, barCount + 1, Math.floor(maxDb - minDb), 16);
     
         levels.resize(bars.length - 1);
         for (i in 0...bars.length - 1) {
+            if (barHistories[i] == null)
+                barHistories[i] = new RecentPeakFinder();
+                
             var frequency = minFreq * Math.pow(10, (Math.log(maxFreq / minFreq) / LN10 * (i / barCount)));
             var value = bars[i] / 16;
     
+            // 严格频率过滤
             if (frequency >= 60 && frequency <= 150) {
-                value *= 3.0;
+                value *= 3.0; // 底鼓频段三倍增益
             } else {
-                value *= 0.1;
+                value *= 0.1; // 其他频段只保留10%信号
             }
     
             barHistories[i].push(value);
@@ -205,36 +233,6 @@ class SpectralAnalyzer {
         }
         #end
         return levels;
-    }
-
-    var _buffer:Array<Float> = [];
-
-    function getSignal(data:lime.utils.UInt8Array, bitsPerSample:Int):Array<Float> {
-        switch (bitsPerSample) {
-            case 8:
-                _buffer.resize(data.length);
-                for (i in 0...data.length)
-                    _buffer[i] = data[i] / 128.0;
-
-            case 16:
-                _buffer.resize(Std.int(data.length / 2));
-                for (i in 0..._buffer.length)
-                    _buffer[i] = data.getInt16(i * 2) / 32767.0;
-
-            case 24:
-                _buffer.resize(Std.int(data.length / 3));
-                for (i in 0..._buffer.length)
-                    _buffer[i] = data.getInt24(i * 3) / 8388607.0;
-
-            case 32:
-                _buffer.resize(Std.int(data.length / 4));
-                for (i in 0..._buffer.length)
-                    _buffer[i] = data.getInt32(i * 4) / 2147483647.0;
-
-            default:
-                trace('Unknown integer audio format');
-        }
-        return _buffer;
     }
 
     @:generic
