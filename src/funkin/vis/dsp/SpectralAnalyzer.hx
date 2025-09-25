@@ -259,6 +259,8 @@ class SpectralAnalyzer {
 				value = Math.abs(value);
 			}
 			recentValues.push(value);
+			
+			var recentPeak = recentValues.peak;
 
 			if (levels[i] != null) {
 				levels[i].value = value;
