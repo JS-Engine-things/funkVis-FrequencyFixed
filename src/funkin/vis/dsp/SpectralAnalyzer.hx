@@ -143,63 +143,6 @@ class SpectralAnalyzer {
 		}
 	}
 
-	function normalizedB(value:Float) {
-		var maxValue = maxDb;
-		var minValue = minDb;
-
-		return clamp((value - minValue) / (maxValue - minValue), 0, 1);
-	}
-
-	function calcBars(barCount:Int, peakHold:Int) {
-		#if web
-		bars = [];
-		var logStep = (LogHelper.log10(maxFreq) - LogHelper.log10(minFreq)) / (barCount);
-
-		var scaleMin:Float = Scaling.freqScaleLog(minFreq);
-		var scaleMax:Float = Scaling.freqScaleLog(maxFreq);
-
-		var curScale:Float = scaleMin;
-
-		// var stride = (scaleMax - scaleMin) / bands;
-
-		for (i in 0...barCount) {
-			var curFreq:Float = Math.pow(10, LogHelper.log10(minFreq) + (logStep * i));
-
-			var freqLo:Float = curFreq;
-			var freqHi:Float = Math.pow(10, LogHelper.log10(minFreq) + (logStep * (i + 1)));
-
-			var binLo = freqToBin(freqLo, Floor);
-			var binHi = freqToBin(freqHi);
-
-			bars.push({
-				binLo: binLo,
-				binHi: binHi,
-				freqLo: freqLo,
-				freqHi: freqHi,
-				recentValues: new RecentPeakFinder(peakHold)
-			});
-		}
-
-		if (bars[0].freqLo < minFreq) {
-			bars[0].freqLo = minFreq;
-			bars[0].binLo = freqToBin(minFreq, Floor);
-		}
-
-		if (bars[bars.length - 1].freqHi > maxFreq) {
-			bars[bars.length - 1].freqHi = maxFreq;
-			bars[bars.length - 1].binHi = freqToBin(maxFreq, Floor);
-		}
-		#else
-		if (barCount > barHistories.length) {
-			barHistories.resize(barCount);
-		}
-		for (i in 0...barCount) {
-			if (barHistories[i] == null)
-				barHistories[i] = new RecentPeakFinder();
-		}
-		#end
-	}
-
 	public function getLevels(?levels:Array<Bar>):Array<Bar> {
 		if (levels == null)
 			levels = new Array<Bar>();
@@ -302,14 +245,6 @@ class SpectralAnalyzer {
 				value *= 0.85;
 			}
 
-			// slew limiting
-			var lastValue = recentValues.lastValue;
-			if (maxDelta > 0.0) {
-				var delta = clamp(value - lastValue, -1 * maxDelta, maxDelta);
-				value = lastValue + delta;
-			}
-			recentValues.push(value);
-
 			// Web Audio API exponential smoothing: X'[k] = τ * X'_{-1}[k] + (1 - τ) * |X[k]|
 			var lastValue = recentValues.lastValue;
 			if (smoothingTimeConstant > 0.0 && smoothingTimeConstant < 1.0) {
@@ -364,6 +299,11 @@ class SpectralAnalyzer {
 				trace('Unknown integer audio format');
 		}
 		return _buffer;
+	}
+	
+	@:generic
+	static inline function clamp<T:Float>(val:T, min:T, max:T):T {
+		return val <= min ? min : val >= max ? max : val;
 	}
 
 	@:generic
